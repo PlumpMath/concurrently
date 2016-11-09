@@ -6,6 +6,10 @@ all: test
 test:
 	tox --recreate
 
+.PHONY: test_full
+test_full:
+	docker-compose -p concurrently -f tests/docker-compose.yml up
+
 
 .PHONY: build_doc
 build_doc:
