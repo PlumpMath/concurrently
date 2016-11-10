@@ -33,6 +33,8 @@ Runs code in threads with asyncio::
 .. autoclass:: concurrently.AsyncIOThreadEngine
 """
 import asyncio
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from typing import Callable, List
@@ -46,9 +48,10 @@ class AsyncIOWaiter(AbstractWaiter):
         self._fs = fs
         self._loop = loop
 
-    async def __call__(self, *, suppress_exceptions=False, fail_hard=False):
+    @asyncio.coroutine
+    def __call__(self, *, suppress_exceptions=False, fail_hard=False):
         when = asyncio.FIRST_EXCEPTION if fail_hard else asyncio.ALL_COMPLETED
-        done, pending = await asyncio.wait(
+        done, pending = yield from asyncio.wait(
             self._fs, loop=self._loop, return_when=when
         )
 
@@ -56,16 +59,17 @@ class AsyncIOWaiter(AbstractWaiter):
             f = next(filter(lambda x: x.exception(), done), None)
             if f:
                 [p.cancel() for p in pending]
-                await asyncio.wait(pending, loop=self._loop)
+                yield from asyncio.wait(pending, loop=self._loop)
                 raise f.exception()
 
         if not suppress_exceptions and self.exceptions():
             raise UnhandledExceptions(self.exceptions())
 
-    async def stop(self):
+    @asyncio.coroutine
+    def stop(self):
         for f in self._fs:
             f.cancel()
-        await self(suppress_exceptions=True)
+        yield from self(suppress_exceptions=True)
 
     @lru_cache()
     def exceptions(self) -> List[Exception]:
@@ -103,7 +107,10 @@ class AsyncIOThreadEngine(AsyncIOEngine):
     """
     :param loop: specific asyncio loop or use default if `None`
     """
-    _pool = ThreadPoolExecutor()
+    if sys.version_info.major == 3 and sys.version_info.minor >= 5:
+        _pool = ThreadPoolExecutor()
+    else:
+        _pool = ThreadPoolExecutor(os.cpu_count() * 5)
 
     def create_task(self, fn: Callable[[], None]) -> asyncio.Future:
         assert not asyncio.iscoroutinefunction(fn), \
